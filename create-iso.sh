@@ -269,7 +269,7 @@ TIMEOUT 50
 
 LABEL linux
   KERNEL /boot/vmlinuz
-  APPEND initrd=/boot/initramfs.gz quiet
+  APPEND initrd=/boot/initramfs.gz
 ISOLINUXEOF
 
 echo "Creating ISO image..."
