@@ -51,24 +51,28 @@ if ! ./bin/busybox --install -s bin; then
     exit 1
 fi
 
+# Also install to /sbin for system utilities
+if ! ./bin/busybox --install -s sbin; then
+    echo "Error: Failed to install busybox applets to sbin"
+    exit 1
+fi
+
 # Ensure /bin/sh exists (critical for init)
 if [ ! -L bin/sh ]; then
     ln -s busybox bin/sh
 fi
-
-# Create sbin symlinks
-cd sbin
-ln -sf ../bin/busybox init
-cd /build/initramfs
 
 echo "Busybox applets installed successfully"
 cd /build
 
 echo "Creating initramfs structure..."
 cd /build/initramfs
-mkdir -p dev proc sys tmp etc/init.d lib usr/lib
+mkdir -p dev proc sys tmp etc lib usr/lib root
 
-# Create init script at root - use /bin/busybox directly
+# Ensure sh symlink exists in bin
+ln -sf busybox bin/sh
+
+# Create init script at root - use explicit busybox path for shebang
 cat > init << 'INITEOF'
 #!/bin/busybox sh
 
@@ -81,11 +85,16 @@ cat > init << 'INITEOF'
 [ -e /dev/console ] || /bin/busybox mknod -m 622 /dev/console c 5 1
 [ -e /dev/tty ] || /bin/busybox mknod -m 666 /dev/tty c 5 0
 [ -e /dev/tty0 ] || /bin/busybox mknod -m 620 /dev/tty0 c 4 0
+[ -e /dev/null ] || /bin/busybox mknod -m 666 /dev/null c 1 3
 
-# Set up controlling terminal
-/bin/busybox setsid /bin/busybox cttyhack /bin/busybox sh -c '
+# Set PATH environment variable
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+# Set hostname
+/bin/busybox hostname protogenix
+
+# Display welcome message
 /bin/busybox clear
-
 /bin/busybox echo "========================================"
 /bin/busybox echo "  Welcome to Protogenix!"
 /bin/busybox echo "========================================"
@@ -93,22 +102,33 @@ cat > init << 'INITEOF'
 /bin/busybox echo "Kernel: $(/bin/busybox uname -r)"
 /bin/busybox echo "Architecture: $(/bin/busybox uname -m)"
 /bin/busybox echo ""
-/bin/busybox echo "Type '\''help'\'' to see available commands"
+/bin/busybox echo "Type 'help' to see available commands"
 /bin/busybox echo ""
 
-exec /bin/busybox sh
-'
+# Start shell with proper terminal
+exec /bin/busybox setsid /bin/busybox cttyhack /bin/sh
 INITEOF
 
 chmod +x init
 
-# Create inittab
-cat > etc/inittab << 'INITTABEOF'
-::sysinit:/init
-::respawn:/bin/sh
-::ctrlaltdel:/sbin/reboot
-::shutdown:/bin/umount -a -r
-INITTABEOF
+# Create a simple profile to set PATH on login
+cat > etc/profile << 'PROFILEEOF'
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PS1='protogenix:\w\$ '
+export HOME=/root
+
+# Source this in shell startup
+alias help='busybox --help'
+PROFILEEOF
+
+# Create rcS startup script (not used but good to have)
+mkdir -p etc/init.d
+cat > etc/init.d/rcS << 'RCSEOF'
+#!/bin/busybox sh
+# This file is not currently used
+RCSEOF
+
+chmod +x etc/init.d/rcS
 
 # Create fstab
 cat > etc/fstab << 'FSTABEOF'
