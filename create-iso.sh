@@ -96,6 +96,36 @@ fi
 echo "Busybox applets installed successfully ($(ls bin/ | wc -l) in bin/, $(ls sbin/ | wc -l) in sbin/)"
 cd /build
 
+echo "Downloading and installing custom binaries..."
+cd /build/initramfs
+
+# Create lib directories for shared libraries
+mkdir -p lib/x86_64-linux-gnu lib64
+
+# Copy essential libraries from the build container
+echo "Copying essential shared libraries..."
+cp /lib/x86_64-linux-gnu/libc.so.6 lib/x86_64-linux-gnu/
+cp /lib/x86_64-linux-gnu/libm.so.6 lib/x86_64-linux-gnu/
+cp /lib/x86_64-linux-gnu/libpthread.so.0 lib/x86_64-linux-gnu/
+cp /lib/x86_64-linux-gnu/libdl.so.2 lib/x86_64-linux-gnu/
+cp /lib/x86_64-linux-gnu/librt.so.1 lib/x86_64-linux-gnu/
+cp /lib/x86_64-linux-gnu/libtinfo.so.6 lib/x86_64-linux-gnu/ 2>/dev/null || true
+cp /lib/x86_64-linux-gnu/libncursesw.so.6 lib/x86_64-linux-gnu/ 2>/dev/null || true
+
+# Copy the dynamic linker (critical!)
+cp /lib64/ld-linux-x86-64.so.2 lib64/
+
+# Download fastfetch (system info tool)
+echo "Installing fastfetch..."
+wget -q --show-progress "https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-amd64.tar.gz" -O /tmp/fastfetch.tar.gz
+tar -xzf /tmp/fastfetch.tar.gz -C /tmp
+cp /tmp/fastfetch-linux-amd64/usr/bin/fastfetch usr/bin/
+chmod +x usr/bin/fastfetch
+rm -rf /tmp/fastfetch.tar.gz /tmp/fastfetch-linux-amd64
+
+echo "Custom binaries installed successfully!"
+cd /build
+
 echo "Creating initramfs structure..."
 cd /build/initramfs
 mkdir -p dev proc sys tmp etc lib usr/lib root
