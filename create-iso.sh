@@ -77,7 +77,13 @@ cat > init << 'INITEOF'
 /bin/busybox mount -t sysfs sysfs /sys
 /bin/busybox mount -t devtmpfs devtmpfs /dev
 
-# Clear screen
+# Create device nodes if they don't exist
+[ -e /dev/console ] || /bin/busybox mknod -m 622 /dev/console c 5 1
+[ -e /dev/tty ] || /bin/busybox mknod -m 666 /dev/tty c 5 0
+[ -e /dev/tty0 ] || /bin/busybox mknod -m 620 /dev/tty0 c 4 0
+
+# Set up controlling terminal
+/bin/busybox setsid /bin/busybox cttyhack /bin/busybox sh -c '
 /bin/busybox clear
 
 /bin/busybox echo "========================================"
@@ -87,11 +93,11 @@ cat > init << 'INITEOF'
 /bin/busybox echo "Kernel: $(/bin/busybox uname -r)"
 /bin/busybox echo "Architecture: $(/bin/busybox uname -m)"
 /bin/busybox echo ""
-/bin/busybox echo "Type 'help' to see available commands"
+/bin/busybox echo "Type '\''help'\'' to see available commands"
 /bin/busybox echo ""
 
-# Start shell
 exec /bin/busybox sh
+'
 INITEOF
 
 chmod +x init
