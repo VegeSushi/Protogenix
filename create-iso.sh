@@ -45,34 +45,55 @@ echo "Busybox downloaded successfully"
 echo "Installing busybox applets..."
 cd /build/initramfs
 
-# Create all necessary symlinks manually for common commands
-cd bin
-for cmd in sh ash ls cat echo ps mount umount mkdir rmdir cp mv rm ln chmod chown grep sed awk cut sort uniq wc head tail find xargs which whoami id hostname uname df du free top kill killall reboot poweroff halt clear dmesg more less vi getty login su sudo; do
-    ln -sf busybox $cmd
-done
-cd ..
+# Create the directory structure
+mkdir -p bin sbin usr/bin usr/sbin
 
-cd sbin
-for cmd in init reboot poweroff halt ifconfig route; do
-    ln -sf ../bin/busybox $cmd
-done
-cd ..
-
-cd usr/bin
-for cmd in dirname basename; do
-    ln -sf ../../bin/busybox $cmd
-done
+# Get list of all busybox applets and create symlinks
+echo "Creating symlinks for all busybox applets..."
 cd /build/initramfs
+/build/initramfs/bin/busybox --list-full > /tmp/applet_list.txt
+
+while read applet; do
+    # Extract directory and name from full path
+    dir=$(dirname "$applet")
+    name=$(basename "$applet")
+    
+    # Create directory if it doesn't exist
+    mkdir -p "$dir"
+    
+    # Create symlink - calculate relative path to busybox
+    case "$dir" in
+        /bin)
+            ln -sf busybox "bin/$name"
+            ;;
+        /sbin)
+            ln -sf ../bin/busybox "sbin/$name"
+            ;;
+        /usr/bin)
+            ln -sf ../../bin/busybox "usr/bin/$name"
+            ;;
+        /usr/sbin)
+            ln -sf ../../bin/busybox "usr/sbin/$name"
+            ;;
+        *)
+            # Default to bin for unknown paths
+            ln -sf busybox "bin/$name"
+            ;;
+    esac
+done < /tmp/applet_list.txt
 
 # Verify symlinks were created
 echo "Verifying busybox symlinks..."
 ls -la bin/ | head -20
+echo ""
+echo "Checking sbin/:"
+ls -la sbin/ | head -10
 if [ ! -L bin/ls ]; then
     echo "Error: Symlinks not created properly"
     exit 1
 fi
 
-echo "Busybox applets installed successfully"
+echo "Busybox applets installed successfully ($(ls bin/ | wc -l) in bin/, $(ls sbin/ | wc -l) in sbin/)"
 cd /build
 
 echo "Creating initramfs structure..."
