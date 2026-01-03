@@ -45,21 +45,31 @@ echo "Busybox downloaded successfully"
 echo "Installing busybox applets..."
 cd /build/initramfs
 
-# Install busybox and create symlinks
-if ! ./bin/busybox --install -s bin; then
-    echo "Error: Failed to install busybox applets"
-    exit 1
-fi
+# Create all necessary symlinks manually for common commands
+cd bin
+for cmd in sh ash ls cat echo ps mount umount mkdir rmdir cp mv rm ln chmod chown grep sed awk cut sort uniq wc head tail find xargs which whoami id hostname uname df du free top kill killall reboot poweroff halt clear dmesg more less vi; do
+    ln -sf busybox $cmd
+done
+cd ..
 
-# Also install to /sbin for system utilities
-if ! ./bin/busybox --install -s sbin; then
-    echo "Error: Failed to install busybox applets to sbin"
-    exit 1
-fi
+cd sbin
+for cmd in init reboot poweroff halt ifconfig route; do
+    ln -sf ../bin/busybox $cmd
+done
+cd ..
 
-# Ensure /bin/sh exists (critical for init)
-if [ ! -L bin/sh ]; then
-    ln -s busybox bin/sh
+cd usr/bin
+for cmd in dirname basename; do
+    ln -sf ../../bin/busybox $cmd
+done
+cd /build/initramfs
+
+# Verify symlinks were created
+echo "Verifying busybox symlinks..."
+ls -la bin/ | head -20
+if [ ! -L bin/ls ]; then
+    echo "Error: Symlinks not created properly"
+    exit 1
 fi
 
 echo "Busybox applets installed successfully"
@@ -105,8 +115,8 @@ export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 /bin/busybox echo "Type 'help' to see available commands"
 /bin/busybox echo ""
 
-# Start shell with proper terminal
-exec /bin/busybox setsid /bin/busybox cttyhack /bin/sh
+# Start shell with proper terminal and environment
+exec /bin/busybox setsid /bin/busybox cttyhack /bin/sh -c 'export PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PS1="protogenix:\w\$ "; export HOME=/root; exec /bin/sh'
 INITEOF
 
 chmod +x init
@@ -116,10 +126,18 @@ cat > etc/profile << 'PROFILEEOF'
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export PS1='protogenix:\w\$ '
 export HOME=/root
-
-# Source this in shell startup
-alias help='busybox --help'
 PROFILEEOF
+
+# Create .profile in root home directory
+mkdir -p root
+cat > root/.profile << 'ROOTPROFILEEOF'
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PS1='protogenix:\w\$ '
+export HOME=/root
+ROOTPROFILEEOF
+
+# Remove inittab - we're using a simple init script instead
+# The init script will handle everything
 
 # Create rcS startup script (not used but good to have)
 mkdir -p etc/init.d
@@ -136,6 +154,8 @@ proc    /proc   proc    defaults    0   0
 sysfs   /sys    sysfs   defaults    0   0
 devtmpfs /dev   devtmpfs defaults   0   0
 FSTABEOF
+
+# Remove passwd/shadow files - not using login for simplicity
 
 echo "Creating initramfs archive..."
 find . | cpio -H newc -o | gzip > /build/iso/boot/initramfs.gz
