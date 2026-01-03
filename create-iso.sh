@@ -47,7 +47,7 @@ cd /build/initramfs
 
 # Create all necessary symlinks manually for common commands
 cd bin
-for cmd in sh ash ls cat echo ps mount umount mkdir rmdir cp mv rm ln chmod chown grep sed awk cut sort uniq wc head tail find xargs which whoami id hostname uname df du free top kill killall reboot poweroff halt clear dmesg more less vi; do
+for cmd in sh ash ls cat echo ps mount umount mkdir rmdir cp mv rm ln chmod chown grep sed awk cut sort uniq wc head tail find xargs which whoami id hostname uname df du free top kill killall reboot poweroff halt clear dmesg more less vi getty login su sudo; do
     ln -sf busybox $cmd
 done
 cd ..
@@ -112,11 +112,9 @@ export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 /bin/busybox echo "Kernel: $(/bin/busybox uname -r)"
 /bin/busybox echo "Architecture: $(/bin/busybox uname -m)"
 /bin/busybox echo ""
-/bin/busybox echo "Type 'help' to see available commands"
-/bin/busybox echo ""
 
-# Start shell with proper terminal and environment
-exec /bin/busybox setsid /bin/busybox cttyhack /bin/sh -c 'export PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PS1="protogenix:\w\$ "; export HOME=/root; exec /bin/sh'
+# Start getty for login prompt
+exec /bin/busybox setsid /bin/busybox cttyhack /bin/getty -n -l /bin/login 38400 tty1
 INITEOF
 
 chmod +x init
@@ -124,20 +122,19 @@ chmod +x init
 # Create a simple profile to set PATH on login
 cat > etc/profile << 'PROFILEEOF'
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
-export PS1='protogenix:\w\$ '
-export HOME=/root
+export PS1='\u@\h:\w\$ '
+export HOME=~
 PROFILEEOF
 
-# Create .profile in root home directory
-mkdir -p root
-cat > root/.profile << 'ROOTPROFILEEOF'
+# Create .profile for protogen user
+mkdir -p home/protogen
+cat > home/protogen/.profile << 'PROTOGENPROFILEEOF'
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
-export PS1='protogenix:\w\$ '
-export HOME=/root
-ROOTPROFILEEOF
+export PS1='protogen@protogenix:\w\$ '
+export HOME=/home/protogen
+PROTOGENPROFILEEOF
 
-# Remove inittab - we're using a simple init script instead
-# The init script will handle everything
+chown -R 1000:1000 home/protogen 2>/dev/null || true
 
 # Create rcS startup script (not used but good to have)
 mkdir -p etc/init.d
@@ -155,7 +152,61 @@ sysfs   /sys    sysfs   defaults    0   0
 devtmpfs /dev   devtmpfs defaults   0   0
 FSTABEOF
 
-# Remove passwd/shadow files - not using login for simplicity
+# Generate password hash for protogen user (password: beep)
+echo "Generating password hash for user 'protogen'..."
+PROTOGEN_PASS_HASH=$(openssl passwd -6 beep)
+echo "Password hash generated: $PROTOGEN_PASS_HASH"
+
+# Create passwd file - root login disabled, protogen user with UID 1000
+cat > etc/passwd << 'PASSWDEOF'
+root:x:0:0:root:/root:/sbin/nologin
+protogen:x:1000:1000:Protogen User:/home/protogen:/bin/sh
+PASSWDEOF
+
+# Create group file with wheel group
+cat > etc/group << 'GROUPEOF'
+root:x:0:
+wheel:x:10:protogen
+protogen:x:1000:
+GROUPEOF
+
+# Create shadow file with generated password hash for protogen
+cat > etc/shadow << SHADOWEOF
+root:!:19000:0:99999:7:::
+protogen:${PROTOGEN_PASS_HASH}:19000:0:99999:7:::
+SHADOWEOF
+
+chmod 640 etc/shadow
+
+# Create sudoers file to allow wheel group to use sudo
+mkdir -p etc/sudoers.d
+cat > etc/sudoers << 'SUDOERSEOF'
+# sudoers file
+Defaults env_reset
+Defaults secure_path="/bin:/sbin:/usr/bin:/usr/sbin"
+
+# Allow wheel group to run all commands
+%wheel ALL=(ALL:ALL) ALL
+
+# Allow wheel group to run commands without password (optional, comment out if you want password)
+# %wheel ALL=(ALL:ALL) NOPASSWD: ALL
+SUDOERSEOF
+
+chmod 440 etc/sudoers
+
+# Create login.defs
+cat > etc/login.defs << 'LOGINDEFSEOF'
+PASS_MAX_DAYS   99999
+PASS_MIN_DAYS   0
+PASS_WARN_AGE   7
+UID_MIN         1000
+UID_MAX         60000
+GID_MIN         1000
+GID_MAX         60000
+CREATE_HOME     yes
+LOGINDEFSEOF
+
+echo "User 'protogen' created with password 'beep'"
 
 echo "Creating initramfs archive..."
 find . | cpio -H newc -o | gzip > /build/iso/boot/initramfs.gz
