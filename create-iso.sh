@@ -165,7 +165,9 @@ export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 /bin/busybox echo ""
 
 # Start getty for login prompt
-exec /bin/busybox setsid /bin/busybox cttyhack /bin/getty -n -l /bin/login 38400 tty1
+/bin/busybox setsid /bin/busybox cttyhack /bin/getty -n -l /bin/login 38400 tty1
+echo "Console session ended, shutting down..."
+exec /bin/busybox poweroff -f
 INITEOF
 
 chmod +x init
