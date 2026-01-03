@@ -126,6 +126,13 @@ export PS1='\u@\h:\w\$ '
 export HOME=~
 PROFILEEOF
 
+# Create .profile for root user
+cat > root/.profile << 'ROOTPROFILEEOF'
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PS1='root@protogenix:\w# '
+export HOME=/root
+ROOTPROFILEEOF
+
 # Create .profile for protogen user
 mkdir -p home/protogen
 cat > home/protogen/.profile << 'PROTOGENPROFILEEOF'
@@ -152,47 +159,31 @@ sysfs   /sys    sysfs   defaults    0   0
 devtmpfs /dev   devtmpfs defaults   0   0
 FSTABEOF
 
-# Generate password hash for protogen user (password: beep)
-echo "Generating password hash for user 'protogen'..."
+# Generate password hashes (password: beep for both users)
+echo "Generating password hashes..."
+ROOT_PASS_HASH=$(openssl passwd -6 beep)
 PROTOGEN_PASS_HASH=$(openssl passwd -6 beep)
-echo "Password hash generated: $PROTOGEN_PASS_HASH"
+echo "Password hashes generated"
 
-# Create passwd file - root login disabled, protogen user with UID 1000
+# Create passwd file - both root and protogen users with working shells
 cat > etc/passwd << 'PASSWDEOF'
-root:x:0:0:root:/root:/sbin/nologin
+root:x:0:0:root:/root:/bin/sh
 protogen:x:1000:1000:Protogen User:/home/protogen:/bin/sh
 PASSWDEOF
 
-# Create group file with wheel group
+# Create group file
 cat > etc/group << 'GROUPEOF'
 root:x:0:
-wheel:x:10:protogen
 protogen:x:1000:
 GROUPEOF
 
-# Create shadow file with generated password hash for protogen
+# Create shadow file with generated password hashes for both users
 cat > etc/shadow << SHADOWEOF
-root:!:19000:0:99999:7:::
+root:${ROOT_PASS_HASH}:19000:0:99999:7:::
 protogen:${PROTOGEN_PASS_HASH}:19000:0:99999:7:::
 SHADOWEOF
 
 chmod 640 etc/shadow
-
-# Create sudoers file to allow wheel group to use sudo
-mkdir -p etc/sudoers.d
-cat > etc/sudoers << 'SUDOERSEOF'
-# sudoers file
-Defaults env_reset
-Defaults secure_path="/bin:/sbin:/usr/bin:/usr/sbin"
-
-# Allow wheel group to run all commands
-%wheel ALL=(ALL:ALL) ALL
-
-# Allow wheel group to run commands without password (optional, comment out if you want password)
-# %wheel ALL=(ALL:ALL) NOPASSWD: ALL
-SUDOERSEOF
-
-chmod 440 etc/sudoers
 
 # Create login.defs
 cat > etc/login.defs << 'LOGINDEFSEOF'
@@ -206,7 +197,9 @@ GID_MAX         60000
 CREATE_HOME     yes
 LOGINDEFSEOF
 
-echo "User 'protogen' created with password 'beep'"
+# Set SUID bit on su to allow privilege escalation (4755)
+chmod 4755 bin/su
+echo "Set SUID bit on /bin/su (mode 4755)"
 
 echo "Creating initramfs archive..."
 find . | cpio -H newc -o | gzip > /build/iso/boot/initramfs.gz
