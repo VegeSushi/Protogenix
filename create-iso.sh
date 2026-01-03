@@ -1,0 +1,150 @@
+#!/bin/bash
+set -e
+
+# Check if running inside container
+if [ ! -f "/.dockerenv" ]; then
+    echo "Error: This script must be run inside a Docker container"
+    exit 1
+fi
+
+echo "Creating build directories..."
+mkdir -p /build/iso/boot/isolinux
+mkdir -p /build/initramfs/bin
+mkdir -p /build/initramfs/sbin
+mkdir -p /build/initramfs/usr/bin
+mkdir -p /build/initramfs/usr/sbin
+
+echo "Downloading precompiled Linux kernel..."
+if ! wget --progress=bar:force "http://ftp.debian.org/debian/dists/bookworm/main/installer-amd64/current/images/netboot/debian-installer/amd64/linux" -O vmlinuz 2>&1; then
+    echo "Error: Failed to download kernel"
+    exit 1
+fi
+
+if [ ! -f vmlinuz ] || [ ! -s vmlinuz ]; then
+    echo "Error: Kernel file is missing or empty"
+    exit 1
+fi
+
+cp vmlinuz /build/iso/boot/vmlinuz
+echo "Kernel downloaded successfully"
+
+echo "Downloading precompiled busybox..."
+if ! wget --progress=bar:force "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox" -O /build/initramfs/bin/busybox 2>&1; then
+    echo "Error: Failed to download busybox"
+    exit 1
+fi
+
+if [ ! -f /build/initramfs/bin/busybox ] || [ ! -s /build/initramfs/bin/busybox ]; then
+    echo "Error: Busybox file is missing or empty"
+    exit 1
+fi
+
+chmod +x /build/initramfs/bin/busybox
+echo "Busybox downloaded successfully"
+
+echo "Installing busybox applets..."
+cd /build/initramfs
+
+# Install busybox and create symlinks
+if ! ./bin/busybox --install -s bin; then
+    echo "Error: Failed to install busybox applets"
+    exit 1
+fi
+
+# Ensure /bin/sh exists (critical for init)
+if [ ! -L bin/sh ]; then
+    ln -s busybox bin/sh
+fi
+
+# Create sbin symlinks
+cd sbin
+ln -sf ../bin/busybox init
+cd /build/initramfs
+
+echo "Busybox applets installed successfully"
+cd /build
+
+echo "Creating initramfs structure..."
+cd /build/initramfs
+mkdir -p dev proc sys tmp etc/init.d lib usr/lib
+
+# Create init script at root - use /bin/busybox directly
+cat > init << 'INITEOF'
+#!/bin/busybox sh
+
+# Mount essential filesystems
+/bin/busybox mount -t proc proc /proc
+/bin/busybox mount -t sysfs sysfs /sys
+/bin/busybox mount -t devtmpfs devtmpfs /dev
+
+# Clear screen
+/bin/busybox clear
+
+/bin/busybox echo "========================================"
+/bin/busybox echo "  Welcome to Protogenix!"
+/bin/busybox echo "========================================"
+/bin/busybox echo ""
+/bin/busybox echo "Kernel: $(/bin/busybox uname -r)"
+/bin/busybox echo "Architecture: $(/bin/busybox uname -m)"
+/bin/busybox echo ""
+/bin/busybox echo "Type 'help' to see available commands"
+/bin/busybox echo ""
+
+# Start shell
+exec /bin/busybox sh
+INITEOF
+
+chmod +x init
+
+# Create inittab
+cat > etc/inittab << 'INITTABEOF'
+::sysinit:/init
+::respawn:/bin/sh
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/umount -a -r
+INITTABEOF
+
+# Create fstab
+cat > etc/fstab << 'FSTABEOF'
+proc    /proc   proc    defaults    0   0
+sysfs   /sys    sysfs   defaults    0   0
+devtmpfs /dev   devtmpfs defaults   0   0
+FSTABEOF
+
+echo "Creating initramfs archive..."
+find . | cpio -H newc -o | gzip > /build/iso/boot/initramfs.gz
+cd /build
+
+echo "Setting up bootloader..."
+cp /usr/lib/ISOLINUX/isolinux.bin /build/iso/boot/isolinux/
+cp /usr/lib/syslinux/modules/bios/ldlinux.c32 /build/iso/boot/isolinux/
+
+cat > /build/iso/boot/isolinux/isolinux.cfg << 'ISOLINUXEOF'
+DEFAULT linux
+PROMPT 0
+TIMEOUT 50
+
+LABEL linux
+  KERNEL /boot/vmlinuz
+  APPEND initrd=/boot/initramfs.gz quiet
+ISOLINUXEOF
+
+echo "Creating ISO image..."
+xorriso -as mkisofs \
+    -o /output/protogenix.iso \
+    -b boot/isolinux/isolinux.bin \
+    -c boot/isolinux/boot.cat \
+    -no-emul-boot \
+    -boot-load-size 4 \
+    -boot-info-table \
+    -J -R -V "Protogenix" \
+    /build/iso
+
+echo "ISO created successfully: /output/protogenix.iso"
+ls -lh /output/protogenix.iso
+
+# Change ownership to match host user
+if [ -n "$HOST_UID" ] && [ -n "$HOST_GID" ]; then
+    chown "$HOST_UID:$HOST_GID" /output/protogenix.iso
+    echo "Changed ownership to UID:GID $HOST_UID:$HOST_GID"
+fi
