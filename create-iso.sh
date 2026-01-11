@@ -123,6 +123,10 @@ cp /tmp/fastfetch-linux-amd64/usr/bin/fastfetch usr/bin/
 chmod +x usr/bin/fastfetch
 rm -rf /tmp/fastfetch.tar.gz /tmp/fastfetch-linux-amd64
 
+echo "Downloading static curl binary..."
+wget -q --show-progress "https://github.com/moparisthebest/static-curl/releases/latest/download/curl-amd64" -O /build/initramfs/usr/bin/curl
+chmod +x /build/initramfs/usr/bin/curl
+
 echo "Custom binaries installed successfully!"
 cd /build
 
