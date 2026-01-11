@@ -126,6 +126,25 @@ rm -rf /tmp/fastfetch.tar.gz /tmp/fastfetch-linux-amd64
 echo "Custom binaries installed successfully!"
 cd /build
 
+# Download and extract kernel modules for networking
+echo "Downloading kernel modules for networking..."
+mkdir -p lib/modules
+wget -q --show-progress "http://ftp.debian.org/debian/dists/bookworm/main/installer-amd64/current/images/netboot/debian-installer/amd64/initrd.gz" -O /tmp/debian-initrd.gz
+cd /tmp
+mkdir -p debian-initrd
+cd debian-initrd
+gunzip -c /tmp/debian-initrd.gz | cpio -idm
+# Copy network-related kernel modules
+if [ -d lib/modules ]; then
+    echo "Copying network kernel modules..."
+    mkdir -p /build/initramfs/lib/modules
+    cp -r lib/modules/* /build/initramfs/lib/modules/ 2>/dev/null || true
+    echo "Available kernel modules:"
+    find /build/initramfs/lib/modules -name "*.ko" | grep -E "(e1000|8139|virtio|net)" | head -20
+fi
+cd /build/initramfs
+rm -rf /tmp/debian-initrd /tmp/debian-initrd.gz
+
 echo "Creating initramfs structure..."
 cd /build/initramfs
 mkdir -p dev proc sys tmp etc lib usr/lib root
@@ -153,6 +172,56 @@ export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 
 # Set hostname
 /bin/busybox hostname protogenix
+
+# Set PATH environment variable
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+# Load network modules using insmod with full paths
+echo "Loading network modules..."
+KVER=$(/bin/busybox uname -r)
+MODDIR="/lib/modules/$KVER/kernel/drivers/net"
+
+# Try to load common network drivers
+for driver in ethernet/intel/e1000/e1000.ko \
+              ethernet/intel/e1000e/e1000e.ko \
+              ethernet/realtek/8139too.ko \
+              ethernet/realtek/8139cp.ko \
+              virtio_net.ko; do
+    if [ -f "$MODDIR/$driver" ]; then
+        echo "Loading $driver..."
+        /bin/busybox insmod "$MODDIR/$driver" 2>/dev/null || true
+    fi
+done
+
+# Also check for virtio in different location
+if [ -f "/lib/modules/$KVER/kernel/drivers/virtio/virtio_net.ko" ]; then
+    echo "Loading virtio_net..."
+    /bin/busybox insmod /lib/modules/$KVER/kernel/drivers/virtio/virtio.ko 2>/dev/null || true
+    /bin/busybox insmod /lib/modules/$KVER/kernel/drivers/virtio/virtio_ring.ko 2>/dev/null || true
+    /bin/busybox insmod /lib/modules/$KVER/kernel/drivers/net/virtio_net.ko 2>/dev/null || true
+fi
+
+# Wait a moment for devices to appear
+/bin/busybox sleep 2
+
+# Bring up loopback
+/bin/busybox ifconfig lo 127.0.0.1 up
+
+# Try to bring up network interfaces with DHCP
+echo "Detecting ethernet cards..."
+echo "Available interfaces:"
+ls /sys/class/net/
+
+for iface in /sys/class/net/*; do
+    iface=$(basename "$iface")
+    [ "$iface" = "lo" ] && continue
+    echo "Configuring interface: $iface"
+    /bin/busybox ifconfig "$iface" up
+    /bin/busybox udhcpc -i "$iface" -t 5 -n -s /bin/simple-dhcp.sh 2>&1 &
+done
+
+# Wait for DHCP
+/bin/busybox sleep 3
 
 # Display welcome message
 /bin/busybox clear
@@ -249,6 +318,14 @@ GID_MIN         1000
 GID_MAX         60000
 CREATE_HOME     yes
 LOGINDEFSEOF
+
+cat > bin/simple-dhcp.sh << 'DHCPEOF'
+#!/bin/busybox sh
+[ -n "$ip" ] && /bin/busybox ifconfig $interface $ip netmask ${subnet:-255.255.255.0}
+[ -n "$router" ] && /bin/busybox route add default gw $router
+DHCPEOF
+
+chmod +x bin/simple-dhcp.sh
 
 # Set SUID bit on su to allow privilege escalation (4755)
 chmod 4755 bin/su
