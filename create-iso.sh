@@ -239,7 +239,7 @@ done
 
 # Start getty for login prompt
 /bin/busybox setsid /bin/busybox cttyhack /bin/getty -n -l /bin/login 38400 tty1
-echo "Console session ended, shutting down..."
+/bin/busybox echo "Console session ended, shutting down..."
 exec /bin/busybox poweroff -f
 INITEOF
 
